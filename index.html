@@ -1,0 +1,461 @@
+<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mathematical Dreamscape</title>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.150.0/build/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            font-family: 'Arial', sans-serif;
+        }
+        #canvas-container {
+            width: 100%;
+            max-width: 1200px;
+            height: 100vh;
+            margin: 0 auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+        }
+        canvas {
+            display: block;
+            max-width: 100%;
+            height: auto;
+        }
+        #ui {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px;
+            border-radius: 8px;
+            color: white;
+            max-width: 250px;
+            transition: all 0.3s ease;
+        }
+        #ui.collapsed {
+            width: 40px;
+            height: 40px;
+            overflow: hidden;
+            padding: 10px;
+        }
+        #ui h3 {
+            margin-top: 0;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .control-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+        }
+        input[type="range"] {
+            width: 100%;
+        }
+        .value-display {
+            font-size: 12px;
+            color: #aaa;
+            text-align: right;
+        }
+        button {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+        button:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+        #toggle-ui {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: white;
+            cursor: pointer;
+            z-index: 100;
+        }
+        #error-message {
+            color: white;
+            text-align: center;
+            padding: 20px;
+            display: none;
+        }
+    </style>
+
+<base target="_self">
+
+
+    </head><body><div id="canvas-container">
+        <div id="error-message"></div>
+    </div>
+    <div id="ui">
+        <h3 onclick="toggleUI()">Shader Controls <span>▼</span></h3>
+        <div class="control-group">
+            <label for="intensity">Mathematical Intensity</label>
+            <input type="range" id="intensity" min="0" max="5" step="0.1" value="2">
+            <div class="value-display" id="intensity-value">2.0</div>
+        </div>
+        <div class="control-group">
+            <label for="symmetry">Symmetry Mode</label>
+            <div>
+                <button onclick="setSymmetry(0)">Freeform</button>
+                <button onclick="setSymmetry(1)">Fractal</button>
+                <button onclick="setSymmetry(2)">Kaleido</button>
+            </div>
+        </div>
+        <div class="control-group">
+            <label for="color-scheme">Color Scheme</label>
+            <div>
+                <button onclick="setColorScheme(0)">Cosmic</button>
+                <button onclick="setColorScheme(1)">Neon</button>
+                <button onclick="setColorScheme(2)">Fire</button>
+            </div>
+        </div>
+        <div class="control-group">
+            <label for="speed">Animation Speed</label>
+            <input type="range" id="speed" min="0" max="2" step="0.1" value="1">
+            <div class="value-display" id="speed-value">1.0</div>
+        </div>
+        <div class="control-group">
+            <label for="audio">Audio Reactivity</label>
+            <input type="range" id="audio" min="0" max="1" step="0.1" value="0.5">
+            <div class="value-display" id="audio-value">0.5</div>
+        </div>
+    </div>
+
+    <script>
+        // Check for WebGL support
+        if (!WebGLRenderingContext) {
+            const container = document.getElementById('canvas-container');
+            container.innerHTML = '<div style="color: white; text-align: center; padding: 20px;">Your browser does not support WebGL. Please try with a modern browser.</div>';
+            throw new Error('WebGL not supported');
+        }
+
+        // Three.js variables
+        let scene, camera, renderer, material, mesh;
+        let mouseX = 0, mouseY = 0;
+        let audioContext, analyser, dataArray;
+        let isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+        
+        // Shader uniforms
+        const uniforms = {
+            time: { value: 0 },
+            resolution: { value: new THREE.Vector2() },
+            mouse: { value: new THREE.Vector2(0, 0) },
+            intensity: { value: 2.0 },
+            symmetryMode: { value: 1 },
+            colorScheme: { value: 0 },
+            audioReactivity: { value: 0.5 },
+            audioData: { value: 0 },
+            speed: { value: 1.0 }
+        };
+
+        // Initialize Three.js scene
+        function init() {
+            // Create scene
+            scene = new THREE.Scene();
+
+            // Create camera
+            camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
+
+            // Create renderer
+            const container = document.getElementById('canvas-container');
+            const width = Math.min(window.innerWidth, 1200);
+            const height = width / (16/9);
+            
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, isMobile ? 1 : 1.5));
+            container.appendChild(renderer.domElement);
+
+            // Update resolution uniform
+            uniforms.resolution.value.set(width, height);
+
+            // Create shader material
+            material = new THREE.ShaderMaterial({
+                uniforms: uniforms,
+                vertexShader: vertexShader,  // Use the variable defined above
+                fragmentShader: fragmentShader  // Use the variable defined above
+            });
+
+            // Create full-screen quad
+            const geometry = new THREE.PlaneGeometry(2, 2);
+            mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            // Setup event listeners
+            window.addEventListener('resize', onWindowResize);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('touchmove', onTouchMove, { passive: false });
+
+            // Setup audio if available
+            setupAudio();
+
+            // Setup UI controls
+            setupUI();
+
+            // Start animation loop
+            animate();
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update time uniform
+            uniforms.time.value += 0.01 * uniforms.speed.value;
+            
+            // Update audio data if available
+            if (analyser) {
+                analyser.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) {
+                    sum += dataArray[i];
+                }
+                uniforms.audioData.value = sum / dataArray.length / 255 * uniforms.audioReactivity.value;
+            }
+            
+            renderer.render(scene, camera);
+        }
+
+        // Window resize handler
+        function onWindowResize() {
+            const container = document.getElementById('canvas-container');
+            const width = Math.min(window.innerWidth, 1200);
+            const height = width / (16/9);
+            
+            renderer.setSize(width, height);
+            uniforms.resolution.value.set(width, height);
+        }
+
+        // Mouse movement handler
+        function onMouseMove(event) {
+            mouseX = (event.clientX / window.innerWidth) * 2 - 1;
+            mouseY = -(event.clientY / window.innerHeight) * 2 + 1;
+            uniforms.mouse.value.set(mouseX, mouseY);
+        }
+
+        // Touch movement handler
+        function onTouchMove(event) {
+            event.preventDefault();
+            if (event.touches.length > 0) {
+                mouseX = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
+                mouseY = -(event.touches[0].clientY / window.innerHeight) * 2 + 1;
+                uniforms.mouse.value.set(mouseX, mouseY);
+            }
+        }
+
+        // Audio setup
+        function setupAudio() {
+            try {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                const microphone = audioContext.createMediaStreamSource(stream);
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 256;
+                dataArray = new Uint8Array(analyser.frequencyBinCount);
+                
+                navigator.mediaDevices.getUserMedia({ audio: true })
+                    .then(function(stream) {
+                        const microphone = audioContext.createMediaStreamSource(stream);
+                        microphone.connect(analyser);
+                    })
+                    .catch(function(err) {
+                        console.log('Audio input not available:', err);
+                    });
+            } catch (e) {
+                console.log('Web Audio API not supported:', e);
+            }
+        }
+
+        // UI setup
+        function setupUI() {
+            // Slider controls
+            document.getElementById('intensity').addEventListener('input', function(e) {
+                uniforms.intensity.value = parseFloat(e.target.value);
+                document.getElementById('intensity-value').textContent = e.target.value;
+            });
+            
+            document.getElementById('speed').addEventListener('input', function(e) {
+                uniforms.speed.value = parseFloat(e.target.value);
+                document.getElementById('speed-value').textContent = e.target.value;
+            });
+            
+            document.getElementById('audio').addEventListener('input', function(e) {
+                uniforms.audioReactivity.value = parseFloat(e.target.value);
+                document.getElementById('audio-value').textContent = e.target.value;
+            });
+        }
+
+        // UI functions
+        function toggleUI() {
+            const ui = document.getElementById('ui');
+            ui.classList.toggle('collapsed');
+        }
+
+        function setSymmetry(mode) {
+            uniforms.symmetryMode.value = mode;
+        }
+
+        function setColorScheme(scheme) {
+            uniforms.colorScheme.value = scheme;
+        }
+
+        // Vertex shader
+        const vertexShader = `
+            varying vec2 vUv;
+            
+            void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
+
+        // Fragment shader
+        const fragmentShader = `
+            precision highp float;
+            
+            uniform float time;
+            uniform vec2 resolution;
+            uniform vec2 mouse;
+            uniform float intensity;
+            uniform int symmetryMode;
+            uniform int colorScheme;
+            uniform float audioReactivity;
+            uniform float audioData;
+            uniform float speed;
+            
+            varying vec2 vUv;
+            
+            // Complex number operations
+            vec2 cmul(vec2 a, vec2 b) {
+                return vec2(a.x*b.x - a.y*b.y, a.x*b.y + a.y*b.x);
+            }
+            
+            vec2 cdiv(vec2 a, vec2 b) {
+                float d = dot(b, b);
+                return vec2(a.x*b.x + a.y*b.y, a.y*b.x - a.x*b.y) / d;
+            }
+            
+            // Möbius transformation
+            vec2 mobius(vec2 z, vec2 a, vec2 b, vec2 c, vec2 d) {
+                return cdiv(cmul(a, z) + b, cmul(c, z) + d);
+            }
+            
+            // Color palette functions
+            vec3 paletteCosmic(float t) {
+                return 0.5 + 0.5 * cos(6.28318 * (t + vec3(0.0, 0.33, 0.67)));
+            }
+            
+            vec3 paletteNeon(float t) {
+                return vec3(
+                    0.5 + 0.5 * sin(t * 3.0 + 0.0),
+                    0.5 + 0.5 * sin(t * 3.0 + 2.0),
+                    0.5 + 0.5 * sin(t * 3.0 + 4.0)
+                );
+            }
+            
+            vec3 paletteFire(float t) {
+                return vec3(
+                    smoothstep(0.0, 0.5, t),
+                    smoothstep(0.2, 0.7, t),
+                    smoothstep(0.5, 1.0, t)
+                );
+            }
+            
+            void main() {
+                // Normalized pixel coordinates
+                vec2 uv = (vUv - 0.5) * resolution.xy / min(resolution.x, resolution.y) * 2.0;
+                
+                // Apply symmetry modes
+                if (symmetryMode == 1) { // Fractal
+                    for(int i = 0; i < 5; i++) {
+                        uv = abs(uv) - 0.5;
+                    }
+                } else if (symmetryMode == 2) { // Kaleido
+                    float angle = atan(uv.y, uv.x);
+                    angle = floor(angle / 3.14159 * 6.0 + 0.5) * 3.14159 / 6.0;
+                    uv = length(uv) * vec2(cos(angle), sin(angle));
+                }
+                
+                // Add mouse interaction
+                vec2 mousePos = mouse * 2.0;
+                float mouseDist = length(uv - mousePos);
+                
+                // Möbius transformation parameters
+                float t = time * 0.2;
+                vec2 a = vec2(cos(t), sin(t * 0.3));
+                vec2 b = vec2(sin(t * 0.7), cos(t * 0.5));
+                vec2 c = vec2(0.0, 0.0);
+                vec2 d = vec2(cos(t * 0.2), sin(t * 0.4));
+                
+                // Apply transformation
+                vec2 z = mobius(uv, a, b, c, d);
+                
+                // Add audio reactivity
+                float audioEffect = audioData * audioReactivity;
+                z *= 1.0 + audioEffect * 0.5;
+                
+                // Create pattern
+                float pattern = sin(z.x * 10.0 * intensity) * cos(z.y * 10.0 * intensity);
+                pattern += sin(length(z) * 20.0 + time * 2.0) * 0.5;
+                
+                // Add mouse distortion
+                pattern += 0.1 / (0.1 + mouseDist * 10.0);
+                
+                // Normalize pattern
+                pattern = pattern * 0.5 + 0.5;
+                
+                // Apply color scheme
+                vec3 color;
+                if (colorScheme == 0) {
+                    color = paletteCosmic(pattern * 2.0 + time * 0.1);
+                } else if (colorScheme == 1) {
+                    color = paletteNeon(pattern * 3.0 + time * 0.2);
+                } else {
+                    color = paletteFire(pattern * 1.5 + time * 0.05);
+                }
+                
+                // Add audio-reactive highlights
+                color += vec3(audioEffect * 0.3);
+                
+                // Output final color
+                gl_FragColor = vec4(color, 1.0);
+            }
+        `;
+
+        // Start the application
+        init();
+    </script>
+
+    <!-- Shader scripts -->
+    <script id="vertexShader" type="x-shader/x-vertex">
+        varying vec2 vUv;
+        
+        void main() {
+            vUv = uv;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    </script>
+
+              
+          
+                
+          
+              
+</body></html>
